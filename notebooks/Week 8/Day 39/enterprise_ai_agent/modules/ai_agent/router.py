@@ -17,3 +17,4 @@ def initiate_chat(query: chat_payload):
 def get_history(session_id: str):
     print("Session id has been recieved")
     return {"session_id": session_id, "history": []}
+
