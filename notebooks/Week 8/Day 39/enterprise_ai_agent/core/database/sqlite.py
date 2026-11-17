@@ -1,44 +1,97 @@
 import json
 import sqlite3
+from pathlib import Path
 from contextlib import closing
 from langchain_core.messages import messages_from_dict, messages_to_dict
 
 
-def connect():
-    return sqlite3.connect("/.", timeout = 30)
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "database.db"
 
-def init_database():
-    with closing(connect()) as connection, connection:
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                message_json TEXT NOT NULL
-            )
-        """)
-        connection.execute("CREATE INDEX IF NOT EXISTS messages_session ON messages(session_id, id)")
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS complaints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_name TEXT NOT NULL,
-                order_id TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                complaint TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'Pending',
-                UNIQUE(customer_name, order_id, phone, complaint)
-            )
-        """)
+
+def connect():
+    return sqlite3.connect(str(DB_PATH), timeout=30)
+
+
+with closing(connect()) as connection, connection:
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            message_json TEXT NOT NULL
+        )
+    """)
+
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS messages_session ON messages(session_id, id)"
+    )
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS complaints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_name TEXT NOT NULL,
+            order_id TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            complaint TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Pending',
+            UNIQUE(customer_name, order_id, phone, complaint)
+        )
+    """)
+
 
 def save_complaint(customer_name, order_id, phone, complaint):
     values = (customer_name, order_id, phone, complaint)
+
     with closing(connect()) as connection, connection:
-        # Retrying the same complaint returns its existing ID.
         connection.execute(
-            "INSERT OR IGNORE INTO complaints (customer_name, order_id, phone, complaint) VALUES (?, ?, ?, ?)",
+            """
+            INSERT OR IGNORE INTO complaints
+            (customer_name, order_id, phone, complaint)
+            VALUES (?, ?, ?, ?)
+            """,
             values,
         )
+
         row = connection.execute(
-            "SELECT id FROM complaints WHERE customer_name=? AND order_id=? AND phone=? AND complaint=?",
+            """
+            SELECT id FROM complaints
+            WHERE customer_name=? AND order_id=? AND phone=? AND complaint=?
+            """,
             values,
         ).fetchone()
-    return {"complaint_id": row[0], "status": "Pending"}
+
+    return {"complaint_id": row[0], "status": "Pending"}\
+    
+def save_messages(session_id, messages):
+    serialized_messages = messages_to_dict(messages)
+
+    with closing(connect()) as connection, connection:
+        connection.executemany(
+            """
+            INSERT INTO messages (session_id, message_json)
+            VALUES (?, ?)
+            """,
+            [
+                (session_id, json.dumps(message, ensure_ascii=False))
+                for message in serialized_messages
+            ],
+        )
+
+
+def load_messages(session_id):
+    with closing(connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT message_json
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+
+    serialized_messages = [
+        json.loads(row[0]) for row in rows
+    ]
+
+    return messages_from_dict(serialized_messages)

@@ -1,20 +1,45 @@
-from fastapi import FastAPI
-from fastapi import APIRouter
-from .schema import chat_payload
+from fastapi import APIRouter, HTTPException
 
+from .schema import chat_payload
+from .service import process_chat, retrieve_history
 
 ai_agent_router = APIRouter(prefix="/ai")
-app = FastAPI()
+
 
 @ai_agent_router.post("/chat")
 def initiate_chat(query: chat_payload):
-    print(query.model_dump())
-    return query
 
+    try:
+
+        result = process_chat(
+            query=query.query,
+            session_id=query.session_id
+        )
+
+        return result
+
+    except Exception as error:
+
+        print(f"Chat Error: {error}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing your message."
+        )
 
 
 @ai_agent_router.get("/history")
 def get_history(session_id: str):
-    print("Session id has been recieved")
-    return {"session_id": session_id, "history": []}
 
+    try:
+
+        return retrieve_history(session_id)
+
+    except Exception as error:
+
+        print(f"History Error: {error}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve chat history."
+        )
